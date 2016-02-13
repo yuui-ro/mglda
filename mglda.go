@@ -55,6 +55,33 @@ type MGLDA struct {
 	Ndvlocz        [][][]float64
 }
 
+func (m *MGLDA) LogLikelihood() float64 {
+	ll := float64(0)
+	for i := 0; i < m.GlobalK; i++ {
+		ss := 0
+		for j := 0; j < m.W; j++ {
+			Nzw := m.Nglzw[i][j]
+			for n := 0; n < Nzw; n++ {
+				ll += math.Log((n + m.GlobalBeta) / (ss + m.W*m.GlobalBeta))
+				ss++
+			}
+		}
+	}
+
+	for i := 0; i < m.LocalK; i++ {
+		ss := 0
+		for j := 0; j < m.W; j++ {
+			Nzw := m.Nglzw[i][j]
+			for n := 0; n < Nzw; n++ {
+				ll += math.Log((n + m.LocalBeta) / (ss + m.W*m.LocalBeta))
+				ss++
+			}
+		}
+	}
+
+	return ll
+}
+
 // Inference runs a go routine for each doc.
 func (m *MGLDA) Inference() {
 	for d, doc := range *m.Docs {
