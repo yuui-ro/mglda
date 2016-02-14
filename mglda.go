@@ -3,11 +3,11 @@ package mglda
 import (
 	"bufio"
 	"fmt"
-	"math/rand"
-
 	"github.com/golang/glog"
 	"github.com/gonum/floats"
 	"github.com/skelterjohn/go.matrix"
+	"math"
+	"math/rand"
 )
 
 const (
@@ -16,8 +16,17 @@ const (
 	localTopic  = "loc"
 )
 
+type DocumentState uint
+
+const (
+	Active DocumentState = iota
+	Frozen
+	Holdout
+)
+
 type Document struct {
 	Sentenses []Sentense `json:"sentenses"`
+	State     DocumentState
 }
 
 type Sentense struct {
@@ -60,9 +69,9 @@ func (m *MGLDA) LogLikelihood() float64 {
 	for i := 0; i < m.GlobalK; i++ {
 		ss := 0
 		for j := 0; j < m.W; j++ {
-			Nzw := m.Nglzw[i][j]
+			Nzw := int(m.Nglzw.Get(i, j))
 			for n := 0; n < Nzw; n++ {
-				ll += math.Log((n + m.GlobalBeta) / (ss + m.W*m.GlobalBeta))
+				ll += math.Log((float64(n) + m.GlobalBeta) / (float64(ss) + float64(m.W)*m.GlobalBeta))
 				ss++
 			}
 		}
@@ -71,9 +80,9 @@ func (m *MGLDA) LogLikelihood() float64 {
 	for i := 0; i < m.LocalK; i++ {
 		ss := 0
 		for j := 0; j < m.W; j++ {
-			Nzw := m.Nglzw[i][j]
+			Nzw := int(m.Nglzw.Get(i, j))
 			for n := 0; n < Nzw; n++ {
-				ll += math.Log((n + m.LocalBeta) / (ss + m.W*m.LocalBeta))
+				ll += math.Log((float64(n) + m.LocalBeta) / (float64(ss) + float64(m.W)*m.LocalBeta))
 				ss++
 			}
 		}
@@ -85,6 +94,9 @@ func (m *MGLDA) LogLikelihood() float64 {
 // Inference runs a go routine for each doc.
 func (m *MGLDA) Inference() {
 	for d, doc := range *m.Docs {
+		if doc.State != Active {
+			continue
+		}
 		for s, sent := range doc.Sentenses {
 			for w, wd := range sent.Words {
 				v := m.Vdsn[d][s][w]
@@ -295,6 +307,9 @@ func NewMGLDA(globalK, localK int, gamma, globalAlpha, localAlpha,
 
 	glog.Info("initializing")
 	for d, doc := range *docs {
+		if doc.State == Holdout {
+			continue
+		}
 		for s, sts := range doc.Sentenses {
 			for w, wd := range sts.Words {
 				v := m.Vdsn[d][s][w]
@@ -320,6 +335,56 @@ func NewMGLDA(globalK, localK int, gamma, globalAlpha, localAlpha,
 	}
 
 	return &m
+}
+
+func (m *MGLDA) loadDocument(d int) {
+	for s, sts := range (*m.Docs)[d].Sentenses {
+		for w, wd := range sts.Words {
+			v := m.Vdsn[d][s][w]
+			r := m.Rdsn[d][s][w]
+			z := m.Zdsn[d][s][w]
+			if r == globalTopic {
+				m.Nglzw.Set(z, wd, m.Nglzw.Get(z, wd)+1)
+				m.Nglz.Set(z, 0, m.Nglz.Get(z, 0)+1)
+				m.Ndvgl[d][s+v] += 1
+				m.Ndglz.Set(d, z, m.Ndglz.Get(d, z)+1)
+				m.Ndgl.Set(d, 0, m.Ndgl.Get(d, 0)+1)
+			} else {
+				m.Nloczw.Set(z, wd, m.Nloczw.Get(z, wd)+1)
+				m.Nlocz.Set(z, 0, m.Nlocz.Get(z, 0)+1)
+				m.Ndvloc[d][s+v] += 1
+				m.Ndvlocz[d][s+v][z] += 1
+			}
+			m.Ndsv[d][s][v] += 1
+			m.Nds[d][s] += 1
+			m.Ndv[d][s+v] += 1
+		}
+	}
+}
+
+func (m *MGLDA) unloadDocument(d int) {
+	for s, sts := range (*m.Docs)[d].Sentenses {
+		for w, wd := range sts.Words {
+			v := m.Vdsn[d][s][w]
+			r := m.Rdsn[d][s][w]
+			z := m.Zdsn[d][s][w]
+			if r == globalTopic {
+				m.Nglzw.Set(z, wd, m.Nglzw.Get(z, wd)-1)
+				m.Nglz.Set(z, 0, m.Nglz.Get(z, 0)-1)
+				m.Ndvgl[d][s+v] -= 1
+				m.Ndglz.Set(d, z, m.Ndglz.Get(d, z)-1)
+				m.Ndgl.Set(d, 0, m.Ndgl.Get(d, 0)-1)
+			} else {
+				m.Nloczw.Set(z, wd, m.Nloczw.Get(z, wd)-1)
+				m.Nlocz.Set(z, 0, m.Nlocz.Get(z, 0)-1)
+				m.Ndvloc[d][s+v] -= 1
+				m.Ndvlocz[d][s+v][z] -= 1
+			}
+			m.Ndsv[d][s][v] -= 1
+			m.Nds[d][s] -= 1
+			m.Ndv[d][s+v] -= 1
+		}
+	}
 }
 
 func GetWordTopicDist(m *MGLDA, vocabulary []string, wt *bufio.Writer) {
@@ -401,4 +466,58 @@ func Learning(m *MGLDA, iteration int, vocabulary []string, wt *bufio.Writer) {
 		glog.Info("inference completed")
 		GetWordTopicDist(m, vocabulary, wt)
 	}
+}
+
+func logAddition(logaa float64, logbb float64) float64 {
+	var rr float64
+	if logaa > logbb {
+		rr = logaa + math.Log(1+math.Exp(logbb-logaa))
+	} else {
+		rr = logbb + math.Log(1+math.Exp(logaa-logbb))
+	}
+	return rr
+}
+
+func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int, wt *bufio.Writer) ([]int, []float64) {
+	var testDocNo []int
+	var dochmloglik []float64
+
+	docs := *m.Docs
+	fmt.Println("Running burnin....")
+	for i := 0; i < trainBurnin; i++ {
+		m.Inference()
+	}
+
+	// freeze the current active documents
+	for _, d := range docs {
+		if d.State == Active {
+			d.State = Frozen
+		}
+	}
+
+	beforeLoglik := m.LogLikelihood()
+	for dno, d := range docs {
+		if d.State == Frozen {
+			continue
+		}
+
+		if d.State == Holdout {
+			d.State = Active
+			hmloglik := -100.0
+			m.loadDocument(dno)
+			for i := 0; i < testBurnin+sampleSpace; i++ {
+				m.Inference()
+				afterLoglik := m.LogLikelihood()
+				if i >= testBurnin {
+					hmloglik = logAddition(hmloglik, afterLoglik-beforeLoglik)
+				}
+			}
+			m.unloadDocument(dno)
+
+			d.State = Holdout
+			testDocNo = append(testDocNo, dno)
+			dochmloglik = append(dochmloglik, hmloglik)
+		}
+	}
+	return testDocNo, dochmloglik
 }
