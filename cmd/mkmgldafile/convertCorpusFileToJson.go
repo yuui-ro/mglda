@@ -36,7 +36,7 @@ func (data *Data) parse(fn string, trainSize int) error {
 
 		d := mglda.Document{}
 
-		if counter < trainSize {
+		if trainSize < 0 || counter < trainSize {
 			d.State = mglda.Active
 		} else {
 			d.State = mglda.Holdout
@@ -88,7 +88,7 @@ func check(e error) {
 
 func main() {
 	corpusFile := flag.String("corpus_file", "corpus", "Corpus file")
-	trainSize := flag.Int("train_size", -1, "Number of documents for training")
+	trainSize := flag.Int("train_size", -1, "Number of documents for training") // if trainSize less than zero, then all documents are used for training
 	outputFile := flag.String("output_file", "output.json", "Output file in Json format")
 	flag.Parse()
 
