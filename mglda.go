@@ -88,7 +88,7 @@ func (m *MGLDA) LogLikelihood() float64 {
 	for i := 0; i < m.LocalK; i++ {
 		ss := 0
 		for j := 0; j < m.W; j++ {
-			Nzw := int(m.Nglzw.Get(i, j))
+			Nzw := int(m.Nloczw.Get(i, j))
 			for n := 0; n < Nzw; n++ {
 				ll += math.Log((float64(n) + m.LocalBeta) / (float64(ss) + float64(m.W)*m.LocalBeta))
 				ss++
@@ -491,13 +491,13 @@ func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int,
 	var dochmloglik []float64
 	var numWords []int
 
-	docs := *m.Docs
 	wt.WriteString("Running burnin....\n")
 	for i := 0; i < trainBurnin; i++ {
-		//		if i%20 == 0 {
 		wt.WriteString(fmt.Sprintf("iterate %d.\n", i))
 		wt.Flush()
-		//		}
+		if i%20 == 0 {
+			wt.WriteString(fmt.Sprintf("    loglikelihood=%f.\n", m.LogLikelihood()))
+		}
 		m.Inference()
 	}
 	beforeLoglik := m.LogLikelihood()
@@ -505,45 +505,47 @@ func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int,
 	// freeze the current active documents
 	wt.WriteString("Freeze the active documents ...\n")
 	wt.Flush()
-	for _, d := range docs {
-		if d.State == Active {
-			d.State = Frozen
+	for i := 0; i < len(*m.Docs); i++ {
+		if (*m.Docs)[i].State == Active {
+			(*m.Docs)[i].State = Frozen
 		}
 	}
 
 	wt.WriteString("Evaluate holdout documents ...\n")
-	for dno, d := range docs {
-		if d.State == Frozen {
+	for dno := 0; dno < len(*m.Docs); dno++ {
+		ptr := &(*m.Docs)[dno]
+		if ptr.State == Frozen {
 			continue
 		}
 
-		if d.State == Holdout {
+		if ptr.State == Holdout {
 			wt.WriteString(fmt.Sprintf("Evaluate document %d.\n", dno))
-			d.State = Active
+			wt.Flush()
+			ptr.State = Active
 			hmloglik := -100.0
 			m.loadDocument(dno)
 			for i := 0; i < testBurnin+sampleSpace; i++ {
 				m.Inference()
-				afterLoglik := m.LogLikelihood()
 				if i >= testBurnin {
-					hmloglik = logAddition(hmloglik, afterLoglik-beforeLoglik)
+					afterLoglik := m.LogLikelihood()
+					hmloglik = logAddition(hmloglik, beforeLoglik-afterLoglik)
 				}
 			}
-			hmloglik += math.Log(float64(sampleSpace))
+			hmloglik = math.Log(float64(sampleSpace)) - hmloglik
 			m.unloadDocument(dno)
-			d.State = Holdout
+			ptr.State = Holdout
 
 			testDocNo = append(testDocNo, dno)
 			dochmloglik = append(dochmloglik, hmloglik)
-			numWords = append(numWords, d.NumberOfWords())
+			numWords = append(numWords, ptr.NumberOfWords())
 		}
 	}
 
-	wt.WriteString("Active the frozen documents...\n")
 	// activate the frozen documents
-	for _, d := range docs {
-		if d.State == Frozen {
-			d.State = Active
+	wt.WriteString("Active the frozen documents...\n")
+	for i := 0; i < len(*m.Docs); i++ {
+		if (*m.Docs)[i].State == Frozen {
+			(*m.Docs)[i].State = Active
 		}
 	}
 
