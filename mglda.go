@@ -33,6 +33,14 @@ type Sentense struct {
 	Words []int `json:"words"`
 }
 
+func (d *Document) NumberOfWords() int {
+	nn := 0
+	for _, s := range (*d).Sentenses {
+		nn += len(s.Words)
+	}
+	return nn
+}
+
 type MGLDA struct {
 	GlobalK        int
 	LocalK         int
@@ -471,37 +479,46 @@ func Learning(m *MGLDA, iteration int, vocabulary []string, wt *bufio.Writer) {
 func logAddition(logaa float64, logbb float64) float64 {
 	var rr float64
 	if logaa > logbb {
-		rr = logaa + math.Log(1+math.Exp(logbb-logaa))
+		rr = logaa + math.Log(1.0+math.Exp(logbb-logaa))
 	} else {
-		rr = logbb + math.Log(1+math.Exp(logaa-logbb))
+		rr = logbb + math.Log(1.0+math.Exp(logaa-logbb))
 	}
 	return rr
 }
 
-func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int, wt *bufio.Writer) ([]int, []float64) {
+func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int, wt *bufio.Writer) ([]int, []float64, []int) {
 	var testDocNo []int
 	var dochmloglik []float64
+	var numWords []int
 
 	docs := *m.Docs
-	fmt.Println("Running burnin....")
+	wt.WriteString("Running burnin....\n")
 	for i := 0; i < trainBurnin; i++ {
+		//		if i%20 == 0 {
+		wt.WriteString(fmt.Sprintf("iterate %d.\n", i))
+		wt.Flush()
+		//		}
 		m.Inference()
 	}
+	beforeLoglik := m.LogLikelihood()
 
 	// freeze the current active documents
+	wt.WriteString("Freeze the active documents ...\n")
+	wt.Flush()
 	for _, d := range docs {
 		if d.State == Active {
 			d.State = Frozen
 		}
 	}
 
-	beforeLoglik := m.LogLikelihood()
+	wt.WriteString("Evaluate holdout documents ...\n")
 	for dno, d := range docs {
 		if d.State == Frozen {
 			continue
 		}
 
 		if d.State == Holdout {
+			wt.WriteString(fmt.Sprintf("Evaluate document %d.\n", dno))
 			d.State = Active
 			hmloglik := -100.0
 			m.loadDocument(dno)
@@ -512,12 +529,23 @@ func EvaluateHoldout(m *MGLDA, trainBurnin int, testBurnin int, sampleSpace int,
 					hmloglik = logAddition(hmloglik, afterLoglik-beforeLoglik)
 				}
 			}
+			hmloglik += math.Log(float64(sampleSpace))
 			m.unloadDocument(dno)
-
 			d.State = Holdout
+
 			testDocNo = append(testDocNo, dno)
 			dochmloglik = append(dochmloglik, hmloglik)
+			numWords = append(numWords, d.NumberOfWords())
 		}
 	}
-	return testDocNo, dochmloglik
+
+	wt.WriteString("Active the frozen documents...\n")
+	// activate the frozen documents
+	for _, d := range docs {
+		if d.State == Frozen {
+			d.State = Active
+		}
+	}
+
+	return testDocNo, dochmloglik, numWords
 }
