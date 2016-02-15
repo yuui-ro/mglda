@@ -63,11 +63,17 @@ func sumOfArrayInt(array *[]int) int {
 	return sum
 }
 
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
+
 func main() {
 	dataFile := flag.String("data", "data.json", "Data file in json")
-	trainBurnin := *flag.Int("train_burnin", 3000, "Number of burnin iterations for training data")
-	testBurnin := *flag.Int("test_burnin", 3000, "Number of burnin iterations for each test document")
-	sampleSpace := *flag.Int("sample_space", 500, "Number of iterations for evaluating the harmonic mean for each holdout document")
+	trainBurnin := flag.Int("train_burnin", 3000, "Number of burnin iterations for training data")
+	testBurnin := flag.Int("test_burnin", 3000, "Number of burnin iterations for each test document")
+	sampleSpace := flag.Int("sample_space", 500, "Number of iterations for evaluating the harmonic mean for each holdout document")
 	confFile := flag.String("config", "conf.json", "Configration file for the settings of parameters")
 	loglikeFile := flag.String("loglikefile", "loglikefile", "Output file for loglikelihood of holdout documents")
 	docnumFile := flag.String("docnumfile", "docnumfile", "Output file for number of words of holdout documents")
@@ -75,7 +81,8 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("dataFile:", *dataFile, "configFile", *confFile)
+	fmt.Printf("train burnin: %d,\ntest burnin: %d, sample space: %d", *trainBurnin, *testBurnin, *sampleSpace)
+
 	conf := &Configuration{}
 	if err := conf.parse(*confFile); err != nil {
 		panic(err)
@@ -99,15 +106,26 @@ func main() {
 	wt := bufio.NewWriter(out)
 	defer wt.Flush()
 
-	_, dochmloglik, numWords := mglda.EvaluateHoldout(m, trainBurnin,
-		testBurnin, sampleSpace, wt)
+	_, dochmloglik, numWords := mglda.EvaluateHoldout(m, *trainBurnin,
+		*testBurnin, *sampleSpace, wt)
 
 	holdoutLoglik := sumOfArrayFloat64(&dochmloglik)
 	holdoutNumWords := sumOfArrayInt(&numWords)
 	holdoutPerplexity := math.Exp(-1.0 * holdoutLoglik / float64(holdoutNumWords))
 
-	ioutil.WriteFile(*docnumFile, []byte(fmt.Sprintf("%d", holdoutNumWords)), 0x644)
-	ioutil.WriteFile(*loglikeFile, []byte(fmt.Sprintf("%f", holdoutLoglik)), 0x644)
-	ioutil.WriteFile(*perplexityFile, []byte(fmt.Sprintf("%f", holdoutPerplexity)), 0x644)
+	fmt.Printf("number of words: %d.\n", holdoutNumWords)
+	f1, err := os.Create(*docnumFile)
+	check(err)
+	f1.WriteString(fmt.Sprint(holdoutNumWords))
+	f1.Sync()
 
+	f2, err := os.Create(*loglikeFile)
+	check(err)
+	f2.WriteString(fmt.Sprintf("%f", holdoutLoglik))
+	f2.Sync()
+
+	f3, err := os.Create(*perplexityFile)
+	check(err)
+	f3.WriteString(fmt.Sprintf("%f", holdoutPerplexity))
+	f3.Sync()
 }
