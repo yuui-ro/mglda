@@ -156,31 +156,19 @@ func (m *MGLDA) Inference() {
 				}
 
 				// sampling from multinomial distribution
-				origIdx := []int{}
-				var sum float64
-				for j, item := range pvrz {
-					sum += item
-					origIdx = append(origIdx, j)
-				}
-				floats.Argsort(pvrz, origIdx)
-
 				var randIdx int
-				idxCount := map[int]int{}
-				for i := 0; i < 100; i++ {
-					var partialSum float64
-					threshold := rand.Float64()
-					for j := len(pvrz) - 1; j >= 0; j-- {
-						partialSum += pvrz[j] / sum
-						if partialSum >= threshold {
-							idxCount[origIdx[j]] += 1
-							break
-						}
-					}
+				var sum float64
+				for _, item := range pvrz {
+					sum += item
 				}
-				var maxCount int
-				for idx, cnt := range idxCount {
-					if cnt > maxCount {
-						randIdx = idx
+
+				threshold := rand.Float64()
+				partialSum := 0.0
+				for i := 0; i < len(pvrz); i++ {
+					partialSum += pvrz[i] / sum
+					if partialSum >= threshold {
+						randIdx = i
+						break
 					}
 				}
 				newV := newVs[randIdx]
