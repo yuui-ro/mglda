@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/yuui-ro/mglda"
 	"io/ioutil"
 	"os"
@@ -23,15 +24,16 @@ func (data *Data) parse(fn string, trainSize int) error {
 	defer fp.Close()
 
 	reader := bufio.NewReader(fp)
-	scanner := bufio.NewScanner(reader)
 
 	var docs = []mglda.Document{}
-
 	counter := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if len(line) == 0 {
-			continue
+
+	var line string
+	line, reader_err := reader.ReadString('\n')
+	for {
+		line = strings.TrimSpace(line)
+		if reader_err != nil && len(line) == 0 {
+			break
 		}
 
 		d := mglda.Document{}
@@ -49,12 +51,12 @@ func (data *Data) parse(fn string, trainSize int) error {
 				panic(err)
 			}
 			sentence.Words = w
-
 			d.Sentenses = append(d.Sentenses, sentence)
 		}
 
 		docs = append(docs, d)
 		counter++
+		line, reader_err = reader.ReadString('\n')
 	}
 
 	data.Docs = docs
@@ -95,6 +97,8 @@ func main() {
 	data := &Data{}
 	err := data.parse(*corpusFile, *trainSize)
 	check(err)
+
+	fmt.Printf("Read %d lines.\n", len(data.Docs))
 
 	b, err := json.Marshal(data)
 	if err != nil {
